@@ -7,6 +7,14 @@ import numpy as np
 from sklearn.model_selection import train_test_split, KFold
 from sklearn import metrics as SkM
 
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    roc_auc_score,
+)
+
 from pyapollon.basic_structures import (
     LabelsType,
     FeaturesType,
@@ -158,7 +166,6 @@ class ModelEvaluator:
         self,
         fit_data: FeaturesLabelsType,
         predict_data: List[FeaturesType],
-        predict_proba: Optional[bool] = False,
     ) -> List[np.ndarray]:
         """Helping function for training the model and predict based on
         inputted data
@@ -176,10 +183,10 @@ class ModelEvaluator:
                     "label": self.model.predict(x, **self._params["predict"]),
                     "proba": (
                         None
-                        if not predict_proba
+                        if not self.proba_involved
                         else self.model.predict_proba(
                             x, **self._params["predict_proba"]
-                        )
+                        )[:, 1]
                     ),
                 },
                 predict_data,
@@ -196,15 +203,14 @@ class ModelEvaluator:
         _prefix = ""
         if prefix is not None:
             _prefix = f"{prefix}__"
-        return {
-            _prefix
-            + _metric_name: (
-                _metric_dict["func"](labels_true, labels_pred)
-                if _metric_dict["type"] == "label"
-                else _metric_dict["func"](labels_true, probas_pred)
-            )
-            for _metric_name, _metric_dict in self.metrics.items()
-        }
+        _result = {}
+        for _metric_name, _metric_dict in self.metrics.items():
+            _key = _prefix + _metric_name
+            if _metric_dict["type"] == "label":
+                _result[_key] = _metric_dict["func"](labels_true, labels_pred)
+            if _metric_dict["type"] == "proba":
+                _result[_key] = _metric_dict["func"](labels_true, probas_pred)
+        return _result
 
     def _evaluate_train_test(  # pylint: disable=dangerous-default-value
         self,
@@ -298,3 +304,23 @@ class RegressionModelEvaluator(ModelEvaluator):
                 "medae": {"func": SkM.median_absolute_error, "type": "label"},
                 "r2": {"func": SkM.r2_score, "type": "label"},
             }
+
+
+class ClassificationModelEvaluator(ModelEvaluator):
+    """Object for Evaluating the performances of a Regression Model"""
+
+    def _set_additional_calls(self):
+        self.proba_involved = hasattr(self.model, "predict_proba")
+        if self.metrics is None:
+            self.metrics = {
+                "accuracy": {"func": accuracy_score, "type": "label"},
+                "precision": {"func": precision_score, "type": "label"},
+                "recall": {"func": recall_score, "type": "label"},
+                "f1": {"func": f1_score, "type": "label"},
+            }
+
+            if self.proba_involved:
+                self.metrics = {
+                    **self.metrics,
+                    "aucroc": {"func": roc_auc_score, "type": "proba"},
+                }
