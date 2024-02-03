@@ -211,13 +211,6 @@ class ModelEvaluator:
             prefix=["sub_train", "sub_val"],
         )
 
-    def evaluate_with_validation(self) -> None:
-        """Evaluate model by validation"""
-
-        self._evaluate_train_test(
-            train_test_data_set=self.data.validation_data_set,
-            prefix=["sub_train", "sub_val"],
-        )
 
     def _calculate_cv_summary(self, cv_results: Dict):
         cv_summary = {}
