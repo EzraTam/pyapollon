@@ -50,9 +50,14 @@ class ModelEvaluator:
                 predict for predict parameter
         model (_type_): Model either parameter has been passed or not
         random_state (int): Number of seed for the randomness
-        metrics (Optional[Dict[str, Callable[[FeaturesType], float]]], optional):
-            List of tuple containing metric name and metric function. Defaults to None.
-            In case None default metrics will be used
+        metrics (Optional[
+            Dict[str, Dict[str, Union[Callable[[FeaturesType], float], str]]]
+        ]):
+            List of tuple containing metric name and dict with:
+              * 'func': metric function,
+              * 'type': 'label' if metric is computed for predicted label and 'proba'
+                for predicted probability.
+            Defaults to None. In case None default metrics will be used
         test_size (Optional[float], optional): Proportion of test data. Defaults to 0.2.
         n_splits_cv (Optional[int], optional): Number of Cross Validation of training data.
             Defaults to 5.
@@ -69,7 +74,9 @@ class ModelEvaluator:
         params: Dict[str, Union[str, float, int]],
         model: Union[Model, ClassificationModel],
         random_state: int,
-        metrics: Optional[Dict[str, Callable[[FeaturesType], float]]] = None,
+        metrics: Optional[
+            Dict[str, Dict[str, Union[Callable[[FeaturesType], float], str]]]
+        ] = None,
         test_size: Optional[float] = 0.2,
         n_splits_cv: Optional[int] = 5,
         validation_size: Optional[float] = 0.2,
@@ -80,7 +87,7 @@ class ModelEvaluator:
         self.n_splits_cv = n_splits_cv
         self.validation_size = validation_size
 
-        self._params_prefix = ["model", "fit", "predict"]
+        self._params_prefix = ["model", "fit", "predict", "predict_proba"]
 
         self.params = params
 
@@ -112,6 +119,9 @@ class ModelEvaluator:
         self.metrics_performance = {}
         self.val_result = {}
         self.cv_result = {}
+
+        # Whether probability label is predicted
+        self.proba_involved = False
 
         self._set_additional_calls()
 
@@ -145,7 +155,10 @@ class ModelEvaluator:
             }
 
     def _fit_predict(
-        self, fit_data: FeaturesLabelsType, predict_data: List[FeaturesType]
+        self,
+        fit_data: FeaturesLabelsType,
+        predict_data: List[FeaturesType],
+        predict_proba: Optional[bool] = False,
     ) -> List[np.ndarray]:
         """Helping function for training the model and predict based on
         inputted data
@@ -156,24 +169,41 @@ class ModelEvaluator:
             _type_: _description_
         """
         self.model.fit(*fit_data, **self._params["fit"])
-        _result = map(
-            lambda x: self.model.predict(x, **self._params["predict"]),
-            predict_data,
+
+        return list(
+            map(
+                lambda x: {
+                    "label": self.model.predict(x, **self._params["predict"]),
+                    "proba": (
+                        None
+                        if not predict_proba
+                        else self.model.predict_proba(
+                            x, **self._params["predict_proba"]
+                        )
+                    ),
+                },
+                predict_data,
+            )
         )
-        return list(_result)
 
     def _compute_metrics(
         self,
         labels_true: LabelsType,
         labels_pred: LabelsType,
+        probas_pred: Optional[LabelsType] = None,
         prefix: Optional[str] = None,
     ) -> None:
         _prefix = ""
         if prefix is not None:
             _prefix = f"{prefix}__"
         return {
-            _prefix + _metric_name: _metric(labels_true, labels_pred)
-            for _metric_name, _metric in self.metrics.items()
+            _prefix
+            + _metric_name: (
+                _metric_dict["func"](labels_true, labels_pred)
+                if _metric_dict["type"] == "label"
+                else _metric_dict["func"](labels_true, probas_pred)
+            )
+            for _metric_name, _metric_dict in self.metrics.items()
         }
 
     def _evaluate_train_test(  # pylint: disable=dangerous-default-value
@@ -189,19 +219,28 @@ class ModelEvaluator:
                 Defaults to ["train", "test"].
         """
         # Get the prediction for train and validation data
-        _list_label_predicted = self._fit_predict(
+        _list_predicted = self._fit_predict(
             fit_data=train_test_data_set.train_data.tuple,
             predict_data=train_test_data_set.feature,
         )
-        for _name, _label_true, _label_predicted in zip(
-            prefix, train_test_data_set.label, _list_label_predicted
+        for _name, _label_true, _predicted in zip(
+            prefix, train_test_data_set.label, _list_predicted
         ):
             _result_metrics = self._compute_metrics(
-                labels_true=_label_true,
-                labels_pred=_label_predicted,
-                prefix=_name,
+                **self._create_arg_compute_metrics(_label_true, _predicted, _name)
             )
             self.metrics_performance.update(_result_metrics)
+
+    def _create_arg_compute_metrics(self, labels_true, predicted, prefix=None):
+        _arg_compute_metrics = dict(
+            labels_true=labels_true, labels_pred=predicted["label"], prefix=prefix
+        )
+        if self.proba_involved:
+            _arg_compute_metrics = {
+                **_arg_compute_metrics,
+                "probas_pred": predicted["proba"],
+            }
+        return _arg_compute_metrics
 
     def evaluate_with_validation(self) -> None:
         """Evaluate model by validation"""
@@ -210,7 +249,6 @@ class ModelEvaluator:
             train_test_data_set=self.data.validation_data_set,
             prefix=["sub_train", "sub_val"],
         )
-
 
     def _calculate_cv_summary(self, cv_results: Dict):
         cv_summary = {}
@@ -225,12 +263,16 @@ class ModelEvaluator:
         cv_results = {_metric_name: [] for _metric_name in self.metrics}
 
         for _data_set in self.data.cv_data_set:
-            _label_predicted = self._fit_predict(
+
+            _predicted = self._fit_predict(
                 fit_data=_data_set.train_data.tuple,
                 predict_data=[_data_set.test_data.feature],
             )[0]
+
             _result = self._compute_metrics(
-                labels_true=_data_set.test_data.label, labels_pred=_label_predicted
+                **self._create_arg_compute_metrics(
+                    _data_set.test_data.label, _predicted
+                )
             )
 
             for _key, _value in _result.items():
@@ -250,9 +292,9 @@ class RegressionModelEvaluator(ModelEvaluator):
     def _set_additional_calls(self):
         if self.metrics is None:
             self.metrics = {
-                "rmse": SkM.root_mean_squared_error,
-                "mae": SkM.mean_absolute_error,
-                "maxe": SkM.max_error,
-                "medae": SkM.median_absolute_error,
-                "r2": SkM.r2_score,
+                "rmse": {"func": SkM.root_mean_squared_error, "type": "label"},
+                "mae": {"func": SkM.mean_absolute_error, "type": "label"},
+                "maxe": {"func": SkM.max_error, "type": "label"},
+                "medae": {"func": SkM.median_absolute_error, "type": "label"},
+                "r2": {"func": SkM.r2_score, "type": "label"},
             }
