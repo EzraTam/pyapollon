@@ -12,10 +12,9 @@ from pyapollon.basic_structures import (
     FeaturesType,
     FeaturesLabelsType,
 )
-from pyapollon.structure_classes import (
-    TrainTestData,
-    MLData,
-)
+from pyapollon.structure_classes import TrainTestData, MLData
+
+from pyapollon.basic_structures import Model, ClassificationModel
 
 # TODO: Type Model
 
@@ -40,13 +39,35 @@ def train_test_split_sorted(
 
 
 class ModelEvaluator:
-    """Object for Evaluating the performances of a model"""
+    """Object for Evaluating the performances of a model
+
+    Args:
+        data (FeaturesLabelsType): Data in Form (Features in numpy, Labels in numpy)
+        params (Dict[str,Union[str,float,int]]): Parameters.
+            Has the keys with prefix:
+                model__ for model parameter
+                fit__ for fit parameter
+                predict for predict parameter
+        model (_type_): Model either parameter has been passed or not
+        random_state (int): Number of seed for the randomness
+        metrics (Optional[Dict[str, Callable[[FeaturesType], float]]], optional):
+            List of tuple containing metric name and metric function. Defaults to None.
+            In case None default metrics will be used
+        test_size (Optional[float], optional): Proportion of test data. Defaults to 0.2.
+        n_splits_cv (Optional[int], optional): Number of Cross Validation of training data.
+            Defaults to 5.
+        validation_size (Optional[float], optional):
+            Proportion of validation data in training data. Defaults to 0.2.
+        model_params_assigned (Optional[bool], optional):
+            Flag whether model has been assigne with parameters.
+            Defaults to False.
+    """
 
     def __init__(
         self,
         data: FeaturesLabelsType,
         params: Dict[str, Union[str, float, int]],
-        model,
+        model: Union[Model, ClassificationModel],
         random_state: int,
         metrics: Optional[Dict[str, Callable[[FeaturesType], float]]] = None,
         test_size: Optional[float] = 0.2,
@@ -54,28 +75,7 @@ class ModelEvaluator:
         validation_size: Optional[float] = 0.2,
         model_params_assigned: Optional[bool] = False,
     ) -> None:
-        """Initialization
-        Args:
-            data (FeaturesLabelsType): Data in Form (Features in numpy, Labels in numpy)
-            params (Dict[str,Union[str,float,int]]): Parameters.
-                Has the keys with prefix:
-                    model__ for model parameter
-                    fit__ for fit parameter
-                    predict for predict parameter
-            model (_type_): Model either parameter has been passed or not
-            random_state (int): Number of seed for the randomness
-            metrics (Optional[Dict[str, Callable[[FeaturesType], float]]], optional):
-                List of tuple containing metric name and metric function. Defaults to None.
-                In case None default metrics will be used
-            test_size (Optional[float], optional): Proportion of test data. Defaults to 0.2.
-            n_splits_cv (Optional[int], optional): Number of Cross Validation of training data.
-                Defaults to 5.
-            validation_size (Optional[float], optional):
-                Proportion of validation data in training data. Defaults to 0.2.
-            model_params_assigned (Optional[bool], optional):
-                Flag whether model has been assigne with parameters.
-                Defaults to False.
-        """
+        """Initialization"""
         self.test_size = test_size
         self.n_splits_cv = n_splits_cv
         self.validation_size = validation_size
@@ -109,20 +109,17 @@ class ModelEvaluator:
         )
 
         self.metrics = metrics
-
-        if metrics is None:
-            self.metrics = {
-                "rmse": SkM.root_mean_squared_error,
-                "mae": SkM.mean_absolute_error,
-                "maxe": SkM.max_error,
-                "medae": SkM.median_absolute_error,
-                "r2": SkM.r2_score,
-            }
-
         self.metrics_performance = {}
-
         self.val_result = {}
         self.cv_result = {}
+
+        self._set_additional_calls()
+
+    def _set_additional_calls(self) -> None:
+        """Method for subclasses executing additional method
+        in init. If no method should be executed. Impelent pass
+        """
+        raise NotImplementedError
 
     def _check_params_ok(self) -> bool:
         """Check whether the inputted parameter is ok
@@ -147,12 +144,6 @@ class ModelEvaluator:
                 if _sort == _param.split("__")[0]
             }
 
-    def train_model(self) -> None:
-        """Train the model respective to train data 
-        and save the performances for train and test data
-        """
-        self._evaluate_train_test(train_test_data_set=self.data.train_test_data_set)
-
     def _fit_predict(
         self, fit_data: FeaturesLabelsType, predict_data: List[FeaturesType]
     ) -> List[np.ndarray]:
@@ -165,7 +156,6 @@ class ModelEvaluator:
             _type_: _description_
         """
         self.model.fit(*fit_data, **self._params["fit"])
-
         _result = map(
             lambda x: self.model.predict(x, **self._params["predict"]),
             predict_data,
@@ -186,7 +176,7 @@ class ModelEvaluator:
             for _metric_name, _metric in self.metrics.items()
         }
 
-    def _evaluate_train_test(
+    def _evaluate_train_test(  # pylint: disable=dangerous-default-value
         self,
         train_test_data_set: TrainTestData,
         prefix: Optional[List[str]] = ["train", "test"],
@@ -221,6 +211,22 @@ class ModelEvaluator:
             prefix=["sub_train", "sub_val"],
         )
 
+    def evaluate_with_validation(self) -> None:
+        """Evaluate model by validation"""
+
+        self._evaluate_train_test(
+            train_test_data_set=self.data.validation_data_set,
+            prefix=["sub_train", "sub_val"],
+        )
+
+    def _calculate_cv_summary(self, cv_results: Dict):
+        cv_summary = {}
+        for metric_name in self.metrics:
+            metric_values = cv_results[metric_name]
+            cv_summary[f"cv__{metric_name}__mean"] = np.mean(metric_values)
+            cv_summary[f"cv__{metric_name}__std"] = np.std(metric_values)
+        return cv_summary
+
     def evaluate_with_cv(self) -> None:
         """Evaluate model by cross validation"""
         cv_results = {_metric_name: [] for _metric_name in self.metrics}
@@ -236,13 +242,24 @@ class ModelEvaluator:
 
             for _key, _value in _result.items():
                 cv_results[_key].append(_value)
-        print(cv_results)
         self.metrics_performance.update(self._calculate_cv_summary(cv_results))
 
-    def _calculate_cv_summary(self, cv_results: Dict):
-        cv_summary = {}
-        for metric_name in self.metrics:
-            metric_values = cv_results[metric_name]
-            cv_summary[f"cv__{metric_name}__mean"] = np.mean(metric_values)
-            cv_summary[f"cv__{metric_name}__std"] = np.std(metric_values)
-        return cv_summary
+    def train_model(self) -> None:
+        """Train the model respective to train data
+        and save the performances for train and test data
+        """
+        self._evaluate_train_test(train_test_data_set=self.data.train_test_data_set)
+
+
+class RegressionModelEvaluator(ModelEvaluator):
+    """Object for Evaluating the performances of a Regression Model"""
+
+    def _set_additional_calls(self):
+        if self.metrics is None:
+            self.metrics = {
+                "rmse": SkM.root_mean_squared_error,
+                "mae": SkM.mean_absolute_error,
+                "maxe": SkM.max_error,
+                "medae": SkM.median_absolute_error,
+                "r2": SkM.r2_score,
+            }
