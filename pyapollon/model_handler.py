@@ -24,6 +24,8 @@ from pyapollon.basic_structures import (
 )
 from pyapollon.structure_classes import MLData, TrainTestData
 
+import xgboost as xgb
+
 
 def train_test_split_sorted(
     data: FeaturesLabelsType, test_size: int, random_state: int
@@ -100,6 +102,19 @@ class ModelEvaluator:
         if not (isinstance(params, dict) and len(params) == 0):
             self._check_params_ok()
 
+        self.data = MLData(
+            *data,
+            test_size=test_size,
+            validation_size=validation_size,
+            n_splits_cv=n_splits_cv,
+            random_state=random_state,
+        )
+
+        # Specific for xgboost for early stopping
+        if model.__name__ in dir(xgb) and "model__early_stopping_rounds" in params:
+            self.params["fit__eval_set"] = [self.data.validation_data_set.train_data.tuple,self.data.validation_data_set.test_data.tuple]
+
+
         self._parse_params()
 
         if model_params_assigned:
@@ -108,14 +123,6 @@ class ModelEvaluator:
             self.model = model(**self._params["model"])
 
         self.random_state = random_state
-
-        self.data = MLData(
-            *data,
-            test_size=test_size,
-            validation_size=validation_size,
-            n_splits_cv=n_splits_cv,
-            random_state=random_state,
-        )
 
         self.kf = KFold(
             n_splits=self.n_splits_cv, shuffle=True, random_state=self.random_state
