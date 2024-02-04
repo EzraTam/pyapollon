@@ -1,7 +1,9 @@
 """Module for help functions"""
 
 from typing import Tuple
+
 from sklearn.model_selection import train_test_split
+
 from pyapollon.basic_structures import FeaturesLabelsType
 
 
