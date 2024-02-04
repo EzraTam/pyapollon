@@ -24,8 +24,6 @@ from pyapollon.basic_structures import (
 )
 from pyapollon.structure_classes import MLData, TrainTestData
 
-# TODO: Type Model
-
 
 def train_test_split_sorted(
     data: FeaturesLabelsType, test_size: int, random_state: int

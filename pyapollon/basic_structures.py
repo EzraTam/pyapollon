@@ -10,13 +10,19 @@ FeaturesLabelsType = Tuple[FeaturesType, LabelsType]
 
 
 class Model:
+    """Abstract Class for Model
+    """
     def fit(self):
-        pass
-
+        """Method for fitting the model to data
+        """
     def predict(self):
-        pass
+        """Method for predicting label from data
+        """
 
 
 class ClassificationModel(Model):
+    """Abstract class for Classification Model
+    """
     def predict_proba(self):
-        pass
+        """Method for predicting the probability of the model
+        """
