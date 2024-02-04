@@ -2,27 +2,27 @@
 """
 
 # from __future__ import annotations
-from typing import Optional, Dict, Callable, Tuple, Union, List
-import numpy as np
-from sklearn.model_selection import train_test_split, KFold
-from sklearn import metrics as SkM
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
+import numpy as np
+from sklearn import metrics as SkM
 from sklearn.metrics import (
     accuracy_score,
+    f1_score,
     precision_score,
     recall_score,
-    f1_score,
     roc_auc_score,
 )
+from sklearn.model_selection import KFold, train_test_split
 
 from pyapollon.basic_structures import (
-    LabelsType,
-    FeaturesType,
+    ClassificationModel,
     FeaturesLabelsType,
+    FeaturesType,
+    LabelsType,
+    Model,
 )
-from pyapollon.structure_classes import TrainTestData, MLData
-
-from pyapollon.basic_structures import Model, ClassificationModel
+from pyapollon.structure_classes import MLData, TrainTestData
 
 # TODO: Type Model
 
